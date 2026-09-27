@@ -96,7 +96,7 @@ class OdometryNode(Node):
         # ------------------------------------------------------------------
         # TODO: Create a publisher for /odom.
         #
-        # self.odom_pub = self.create_publisher(Odometry, "/odom", 10)
+        self.odom_pub = self.create_publisher(Odometry, "/odom", 10)
 
         # ------------------------------------------------------------------
         # Timer — 1 Hz monitoring output
@@ -171,7 +171,21 @@ class OdometryNode(Node):
         #      heading come from and how does it change? See "Heading is not
         #      measured" in the README before you write this line.
         #   6. Call self.publish_odometry().
-        print(msg.tick_count, msg.timestamp)
+
+        if (self.wheel_msg_count == 0):
+            self.last_tick_count = 0
+            self.last_wheel_time = 0
+
+        delta_ticks = msg.tick_count - self.last_tick_count
+        delta_time = msg.timestamp - self.last_wheel_time
+        if (delta_ticks == 0 and delta_time < 0.05): # guard against duplicate messages
+            return
+        distance = delta_ticks * DIST_PER_TICK
+        self.x += distance
+        self.last_tick_count = msg.tick_count
+        self.last_wheel_time = msg.timestamp
+        self.publish_odometry()
+        
 
     # -----------------------------------------------------------------------
     # GPS callback
@@ -233,7 +247,15 @@ class OdometryNode(Node):
         Not every field is required — position is the minimum.
         """
         # TODO: implement
-        pass
+        msg = Odometry()
+        msg.header.frame_id = "odom"
+        msg.child_frame_id = "base_link"
+
+        msg.pose.pose.position.x = self.x
+        msg.pose.pose.position.y = self.y
+
+        self.odom_pub.publish(msg)
+
 
     # -----------------------------------------------------------------------
     # Monitoring callback  (1 Hz)

@@ -180,7 +180,11 @@ class OdometryNode(Node):
         delta_time = msg.timestamp - self.last_wheel_time
         if (delta_ticks == 0 and delta_time < 0.05): # guard against duplicate messages
             return
-        distance = delta_ticks * DIST_PER_TICK
+
+        # can't see dropped ticks because it's a hardware side error, the software sees continuous data, which is supposed to happen anyway
+        # will implement this by comparing with the GPS position
+        
+        distance = delta_ticks * DIST_PER_TICK # m
         self.x += distance
         self.last_tick_count = msg.tick_count
         self.last_wheel_time = msg.timestamp

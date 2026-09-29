@@ -23,6 +23,7 @@ Two things that make life easier here:
 """
 
 import sys
+import math
 
 if __name__ == "__main__":
     # This file is loaded BY the simulator; running it directly can't work.
@@ -31,6 +32,7 @@ if __name__ == "__main__":
 
 import math
 import time
+import collections
 
 import rclpy_lite as rclpy
 from rclpy_lite.node import Node
@@ -87,9 +89,10 @@ class OdometryNode(Node):
 
         # TODO: Create a subscriber for /gps_estimate (same QoS considerations).
         #
-        # self.gps_sub = self.create_subscription(
-        #     GPSEstimate, "/gps_estimate", self.gps_callback, ???
-        # )
+        self.gps_sub = self.create_subscription(
+            GPSEstimate, "/gps_estimate", self.gps_callback,
+            QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, depth=10)
+        )
 
         # ------------------------------------------------------------------
         # Publisher
@@ -121,6 +124,10 @@ class OdometryNode(Node):
 
         self.wheel_msg_count: int = 0
         self.start_time: float = time.monotonic()   # use time.monotonic() to measure durations
+
+        self.wheel_variance = 0
+        self.fixes_between_heading = 10
+        self.gps_position_buffer = collections.deque(maxlen=self.fixes_between_heading)
 
     # -----------------------------------------------------------------------
     # Wheel encoder callback
@@ -183,11 +190,21 @@ class OdometryNode(Node):
 
         # can't see dropped ticks because it's a hardware side error, the software sees continuous data, which is supposed to happen anyway
         # will implement this by comparing with the GPS position
+        # idea: try to get velocity from GPS readings and make an estimate of how far we should travel over time, compare to encoder distance
         
         distance = delta_ticks * DIST_PER_TICK # m
-        self.x += distance
+        # guard against GPS outages by taking latest heading
+        if (self.last_gps_time != None and msg.timestamp - self.last_gps_time > 1.1):
+            self.heading = math.atan2(self.gps_position_buffer[-1][1] - self.gps_position_buffer[0][1],
+                                          self.gps_position_buffer[-1][0] - self.gps_position_buffer[0][0])
+            
+        self.x += distance * math.cos(self.heading)
+        self.y += distance * math.sin(self.heading)
+
         self.last_tick_count = msg.tick_count
         self.last_wheel_time = msg.timestamp
+        self.wheel_msg_count += 1
+        self.wheel_variance += 0.0007 # arbitrarily tuned via testing with --visualize
         self.publish_odometry()
         
 
@@ -223,7 +240,18 @@ class OdometryNode(Node):
         #   2. Blend: self.x = (1 - w_gps) * self.x + w_gps * msg.x
         #             self.y = (1 - w_gps) * self.y + w_gps * msg.y
         #   3. Update self.last_gps_time = msg.timestamp
-        pass
+
+        w_gps = self.wheel_variance / (self.wheel_variance + msg.covariance)
+        self.x = (1 - w_gps) * self.x + w_gps * msg.x
+        self.y = (1 - w_gps) * self.y + w_gps * msg.y
+        self.wheel_variance *= (1 - w_gps) # decrease wheel variance after fix
+        self.last_gps_time = msg.timestamp
+        self.gps_position_buffer.append((msg.x, msg.y))
+        if (len(self.gps_position_buffer) == self.fixes_between_heading):
+            self.heading = math.atan2(self.gps_position_buffer[-1][1] - self.gps_position_buffer[0][1],
+                              self.gps_position_buffer[-1][0] - self.gps_position_buffer[0][0])
+
+        # find a way to handle long outages
 
     # -----------------------------------------------------------------------
     # Odometry publisher
@@ -282,7 +310,9 @@ class OdometryNode(Node):
             [odom] pos=(1.23, 0.45)m  enc=0.02s ago @49.8Hz  gps=0.91s ago
         """
         # TODO: implement
-        pass
+        cur_time = time.monotonic()
+        # Hz calc is probably wrong
+        print(f"[odom] pos=({self.x}, {self.y})m  enc={cur_time - self.last_wheel_time}s ago @{(cur_time - self.last_wheel_time)*60}Hz  gps={cur_time - self.last_gps_time}s ago")
 
 
 # ---------------------------------------------------------------------------

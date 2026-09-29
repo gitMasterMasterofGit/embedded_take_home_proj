@@ -106,7 +106,7 @@ class OdometryNode(Node):
         # ------------------------------------------------------------------
         # TODO: Create a timer that calls self.monitoring_callback once per second.
         #
-        # self.monitor_timer = self.create_timer(1.0, self.monitoring_callback)
+        self.monitor_timer = self.create_timer(1.0, self.monitoring_callback)
 
         # ------------------------------------------------------------------
         # State  — add whatever you need
@@ -181,10 +181,10 @@ class OdometryNode(Node):
 
         if (self.wheel_msg_count == 0):
             self.last_tick_count = 0
-            self.last_wheel_time = 0
+            self.last_tick_time = 0
 
         delta_ticks = msg.tick_count - self.last_tick_count
-        delta_time = msg.timestamp - self.last_wheel_time
+        delta_time = msg.timestamp - self.last_tick_time
         if (delta_ticks == 0 and delta_time < 0.05): # guard against duplicate messages
             return
 
@@ -202,9 +202,11 @@ class OdometryNode(Node):
         self.y += distance * math.sin(self.heading)
 
         self.last_tick_count = msg.tick_count
-        self.last_wheel_time = msg.timestamp
+        self.last_tick_time = msg.timestamp
         self.wheel_msg_count += 1
         self.wheel_variance += 0.0007 # arbitrarily tuned via testing with --visualize
+        #print("wheel time: " + str(msg.timestamp) + " " + str(self.start_time))
+        self.last_wheel_time = time.monotonic() - self.start_time
         self.publish_odometry()
         
 
@@ -250,8 +252,8 @@ class OdometryNode(Node):
         if (len(self.gps_position_buffer) == self.fixes_between_heading):
             self.heading = math.atan2(self.gps_position_buffer[-1][1] - self.gps_position_buffer[0][1],
                               self.gps_position_buffer[-1][0] - self.gps_position_buffer[0][0])
+        self.last_gps_time = time.monotonic() - self.start_time
 
-        # find a way to handle long outages
 
     # -----------------------------------------------------------------------
     # Odometry publisher
@@ -311,8 +313,11 @@ class OdometryNode(Node):
         """
         # TODO: implement
         cur_time = time.monotonic()
-        # Hz calc is probably wrong
-        print(f"[odom] pos=({self.x}, {self.y})m  enc={cur_time - self.last_wheel_time}s ago @{(cur_time - self.last_wheel_time)*60}Hz  gps={cur_time - self.last_gps_time}s ago")
+        session_time = cur_time - self.start_time
+        
+        print(f"[odom] pos=({self.x:.2f}, {self.y:.2f})m " +
+              f"enc={session_time - self.last_wheel_time:.4f}s ago @{self.wheel_msg_count / session_time:.2f}Hz " +
+              f"gps={session_time - self.last_gps_time:.4f}s ago")
 
 
 # ---------------------------------------------------------------------------
